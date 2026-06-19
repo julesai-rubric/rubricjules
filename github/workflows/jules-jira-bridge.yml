@@ -1,0 +1,161 @@
+name: "Jules AI - Execute Jira Work Item"
+
+on:
+  repository_dispatch:
+    types: [jira-to-jules]
+
+  workflow_dispatch:
+    inputs:
+      jira_issue_key:
+        description: "Jira Issue Key (e.g. PLAI-42)"
+        required: true
+        type: string
+      summary:
+        description: "Issue summary / title"
+        required: true
+        type: string
+      description:
+        description: "Full issue description"
+        required: false
+        type: string
+        default: ""
+      acceptance_criteria:
+        description: "Acceptance criteria (if any)"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  jules-execute:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Parse Jira payload
+        id: jira
+        run: |
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "issue_key=${{ github.event.client_payload.issue_key }}" >> $GITHUB_OUTPUT
+            echo "summary<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ github.event.client_payload.summary }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "description<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ github.event.client_payload.description }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "acceptance_criteria<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ github.event.client_payload.acceptance_criteria }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "issue_key=${{ inputs.jira_issue_key }}" >> $GITHUB_OUTPUT
+            echo "summary<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ inputs.summary }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "description<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ inputs.description }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "acceptance_criteria<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ inputs.acceptance_criteria }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get Jules source for this repo
+        id: source
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+        run: |
+          HTTP_CODE=$(curl -s -o /tmp/jules_response.json -w "%{http_code}" \
+            -H "x-goog-api-key: ${JULES_API_KEY}" \
+            "https://jules.googleapis.com/v1alpha/sources")
+
+          echo "HTTP status: ${HTTP_CODE}"
+          echo "Response body:"
+          cat /tmp/jules_response.json | jq . 2>/dev/null || cat /tmp/jules_response.json
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Jules API returned HTTP ${HTTP_CODE}. Check your JULES_API_KEY and that the Jules GitHub App is installed on this repo."
+            exit 1
+          fi
+
+          REPO_FULL="${{ github.repository }}"
+          SOURCE_NAME=$(cat /tmp/jules_response.json | jq -r \
+            ".sources[] | select(.name | contains(\"${REPO_FULL}\")) | .name" \
+            | head -1)
+
+          if [ -z "$SOURCE_NAME" ] || [ "$SOURCE_NAME" == "null" ]; then
+            echo "::error::Could not find Jules source for repo ${REPO_FULL}."
+            echo "::error::Make sure the Jules GitHub app is installed on this repo."
+            echo "Available sources:"
+            cat /tmp/jules_response.json | jq -r '.sources[].name'
+            exit 1
+          fi
+
+          echo "source_name=${SOURCE_NAME}" >> $GITHUB_OUTPUT
+          echo "Found Jules source: ${SOURCE_NAME}"
+
+      - name: Create Jules session
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+        run: |
+          ISSUE_KEY="${{ steps.jira.outputs.issue_key }}"
+          SUMMARY="${{ steps.jira.outputs.summary }}"
+          DESCRIPTION="${{ steps.jira.outputs.description }}"
+          AC="${{ steps.jira.outputs.acceptance_criteria }}"
+          SOURCE="${{ steps.source.outputs.source_name }}"
+          BRANCH="${{ github.event.repository.default_branch }}"
+          BRANCH="${BRANCH:-main}"
+
+          PROMPT="You are implementing Jira issue ${ISSUE_KEY}.
+
+          ## Task Summary
+          ${SUMMARY}
+
+          ## Description
+          ${DESCRIPTION}
+
+          ## Acceptance Criteria
+          ${AC}
+
+          ## Instructions
+          - Follow existing code conventions and patterns.
+          - Add or update unit tests to cover your changes.
+          - Run the test suite and ensure all tests pass.
+          - Reference ${ISSUE_KEY} in commit messages.
+          - Keep changes focused - do not refactor unrelated code."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "https://jules.googleapis.com/v1alpha/sessions" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "x-goog-api-key: ${JULES_API_KEY}" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              --arg source "$SOURCE" \
+              --arg branch "$BRANCH" \
+              --arg title "${ISSUE_KEY}: ${SUMMARY}" \
+              '{
+                prompt: $prompt,
+                sourceContext: {
+                  source: $source,
+                  githubRepoContext: {
+                    startingBranch: $branch
+                  }
+                },
+                automationMode: "AUTO_CREATE_PR",
+                title: $title
+              }')")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP status: ${HTTP_CODE}"
+          echo "Response:"
+          echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Jules session creation failed with HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+
+          SESSION_NAME=$(echo "$BODY" | jq -r '.name // "unknown"')
+          echo "Jules session created: ${SESSION_NAME}"
