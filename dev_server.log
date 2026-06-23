@@ -1,0 +1,43 @@
+$ next dev
+   ▲ Next.js 15.1.6
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.0.2:3000
+
+ ✓ Starting...
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+ ✓ Ready in 1901ms
+ ○ Compiling / ...
+ ✓ Compiled / in 12.1s (1350 modules)
+ GET / 200 in 12997ms
+ GET /about 200 in 13018ms
+ GET / 200 in 96ms
+ GET / 200 in 115ms
+ GET / 200 in 105ms
+ ○ Compiling /services ...
+ ✓ Compiled /services in 576ms (1334 modules)
+ GET /services 200 in 691ms
+ GET /services 200 in 25ms
+ ✓ Compiled in 183ms (662 modules)
+ ✓ Compiled in 467ms (662 modules)
+ GET / 200 in 209ms
+ GET /about 200 in 104ms
+ GET /about 200 in 45ms
+ GET / 200 in 33ms
+ GET / 200 in 50ms
+ GET / 200 in 58ms
+ ○ Compiling /careers ...
+ ✓ Compiled /careers in 817ms (1322 modules)
+ GET /careers 200 in 926ms
+ GET /services 200 in 34ms
+ GET / 200 in 203ms
+ GET /services 200 in 45ms
+ GET /about 200 in 44ms
+ GET /careers 200 in 45ms
+ GET / 200 in 38ms
+ GET /services 200 in 35ms
+ GET /about 200 in 36ms
+ GET /careers 200 in 44ms
